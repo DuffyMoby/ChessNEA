@@ -12,10 +12,9 @@ class Evalnn_fn:
         return self.eval_net(_input)
 
 
-RANGE = np.arange(64, dtype=np.uint64)[::-1] # range exists as a built-in. sorry
-B_BOARDS = np.array([n for n in range(1,12,2)])
-W_BOARDS = np.array([n for n in range(0,11,2)])
-
+RANGE = np.arange(64, dtype=np.uint64)[::-1] # Array of ints from 1-64
+B_BOARDS = np.array([n for n in range(1,12,2)]) # Odd indexes
+W_BOARDS = np.array([n for n in range(0,11,2)]) # Even indexes
 def board2bb(board: chess.Board) -> torch.tensor: 
     """
     Converts a chess.Board object into a binary array of bitboards
