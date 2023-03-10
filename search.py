@@ -1,7 +1,5 @@
 import chess
 import math
-from eval import evaluate
-
 
 def searchAB(eval_fn, board: chess.Board, depth, alpha = -math.inf, beta = +math.inf):
     """
@@ -26,7 +24,7 @@ def searchAB(eval_fn, board: chess.Board, depth, alpha = -math.inf, beta = +math
     """
     if depth == 0 :
         return eval_fn(board), None
-
+        
     maxeval = -math.inf
     bestmove = None
     # TODO move ordering, iterative deeping, tranposition table 
@@ -42,22 +40,21 @@ def searchAB(eval_fn, board: chess.Board, depth, alpha = -math.inf, beta = +math
         alpha = max(alpha, maxeval)
         if alpha >= beta:
             break
-
-    
+ 
     return maxeval, bestmove
 
-def search(board: chess.Board, whitetomove: bool, depth):
+def search(eval_fn, board: chess.Board, depth):
     """
     Basic Negamax search
     """
     if depth == 0 :
-        return evaluate(board, whitetomove), None
+        return eval_fn(board), None
 
     maxeval = -math.inf
     bestmove = None
     for move in board.legal_moves:
         board.push(move)
-        eval, _ = search(board, (not whitetomove), depth - 1)
+        eval, _ = search(eval_fn, board, depth - 1)
         eval = -eval
         board.pop()
         if eval > maxeval:

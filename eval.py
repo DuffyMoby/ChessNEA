@@ -22,7 +22,7 @@ def evaluate(board: chess.Board, whitetomove : bool):
             + PAWN_WT * ((board.pawns & white_bb).bit_count() - (board.pawns & black_bb).bit_count())
 
     eval = mat_score
-    if not whitetomove:
+    if not board.turn:
         eval = -eval
     return eval
 

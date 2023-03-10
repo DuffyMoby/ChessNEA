@@ -24,6 +24,6 @@ def board2bb(board: chess.Board) -> torch.tensor:
     pcolor = pcolor.flatten()
     bitboard = (pcolor[:, None] & (1 << RANGE)) > 0
     bitboard = bitboard.astype(np.float32)
-    bitboard[W_BOARDS] = bitboard[W_BOARDS] * (board.turn + (1 - board.turn) * -1) # Negate white bits if black to move
+    bitboard[W_BOARDS] = bitboard[W_BOARDS] * (board.turn + (board.turn - 1)) # Negate white bits if black to move
     bitboard[B_BOARDS] = bitboard[B_BOARDS] * (board.turn * -1 + (1 - board.turn) ) # Negate black bits if white to move
     return torch.from_numpy(bitboard.flatten())
