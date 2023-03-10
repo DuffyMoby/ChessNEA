@@ -2,10 +2,8 @@ import torch
 import os
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-import pandas as pd
 import pytorch_lightning as pl
 from argparse import ArgumentParser
-import numpy as np
 import pickle as pkl
 import tensorboard
 
@@ -40,7 +38,7 @@ class Sparse_set(Dataset):
         eval = self.centipawns[idx]
         eval = torch.as_tensor(eval, dtype=torch.float32)
 
-        stm = torch.as_tensor(self.stms[idx], dtype=int)
+        stm = torch.as_tensor(self.stms[idx], dtype=torch.float32)
 
         bitboard = torch.sparse_coo_tensor([indices], values, [768])
         
@@ -115,7 +113,7 @@ class nnEval_model_set1_v2(pl.LightningModule):
 
     def training_step(self, batch):
         x, y, stm = batch
-        stm = torch.reshape(stm, (-1, 1)) # converts to 2d tensor of shape (batchsize, 1)
+        stm = torch.reshape(stm, (-1, 1)) # converts to 2d tensor of shape (batchsize, 1))
         y = torch.reshape(y, (-1, 1)) 
         y_hat = self.net(x) * (stm + (1 - stm)) # negates eval if black to move
 
