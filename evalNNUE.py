@@ -19,30 +19,29 @@ PIECE_TABLE = {
 
 
 class Accumulator:
-    def __init__(self, w_weights, b_weights) -> None:
+    def __init__(self, w_weights: torch.tensor, b_weights: torch.tensor, acc: torch.tensor) -> None:
         self.w_weights = w_weights
         self.b_weights = b_weights
-        self.acc_size = self.w_weights.shape[0]
-        self.acc = torch.zeros((2, self.acc_size)) # tensor of size (2(stm) * out_features)
+        self.acc = acc
         
     def update(self, board: chess.Board, move: chess.Move):
         w_remove_feature_indicies, w_add_feature_indicies, b_remove_feature_indicies, b_add_feature_indicies = self.get_indices_from_move(board, move)
-        self.acc[1] = self.acc[1].index_add(1, w_remove_feature_indicies, self.acc[1], alpha= -1)
-        self.acc[1] = self.acc[1].index_add(1, w_add_feature_indicies, self.acc[1], alpha= 1)
-        self.acc[0] = self.acc[0].index_add(1, b_remove_feature_indicies, self.acc[0], alpha= -1)
-        self.acc[0] = self.acc[0].index_add(1, b_add_feature_indicies, self.acc[0], alpha= 1)
+        self.acc[1] = self.acc[1] - torch.sum(self.w_weights[:, w_remove_feature_indicies], dim=1)
+        self.acc[1] = self.acc[1] + torch.sum(self.w_weights[:, w_add_feature_indicies], dim=1)
+        self.acc[0] = self.acc[0] - torch.sum(self.b_weights[:, b_remove_feature_indicies], dim=1)
+        self.acc[0] = self.acc[0] + torch.sum(self.b_weights[:, b_add_feature_indicies], dim=1)
 
     def refresh(self, board: chess.Board):
         w_indices, b_indices = self.get_indices(board)
-        w_accumulator = torch.sum(self.w_weights[: ,w_indices])
+        w_accumulator = torch.sum(self.w_weights[:, w_indices], dim=1)
         # since weights are stored as shape (out_features, in_features)
         # we sum the columns since each column represents an index of the input features
-        b_accumulator = torch.sum(self.b_weights[: ,b_indices])
+        b_accumulator = torch.sum(self.b_weights[:, b_indices], dim=1)
         self.acc[1] = w_accumulator
         self.acc[0] = b_accumulator
         
     def new_instance(self):
-        return Accumulator(self.weights, self.white_accumulator, self.black_accumulator)
+        return Accumulator(self.w_weights, self.b_weights, self.acc)
     
     def get_indices(self, board: chess.Board):
         piece_bitboards = np.array([board.pawns, board.knights, board.bishops, board.rooks, board.queens], dtype=np.uint64)
