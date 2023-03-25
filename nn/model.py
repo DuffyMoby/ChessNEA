@@ -8,13 +8,13 @@ import pickle as pkl
 import numpy as np
 import tensorboard
 
-FEATURE_SIZE_HALFKP = 40960
+
 SCALING_FACTOR = 410
 
 class BIGDATA(Dataset):
     def __init__(self, positions) -> None:
-        self.bitboards = positions['bitboard']
-        self.centipawns = positions['centipawn']
+        self.bitboards = positions['bitboards']
+        self.centipawns = positions['centipawns']
     
     def __len__(self):
         return self.centipawns.shape[0] 
@@ -26,10 +26,9 @@ class BIGDATA(Dataset):
         return bitboard, eval
 
 
-class sparse_set1_v2(Dataset):
+class sparse_set1_v1(Dataset):
     def __init__(self, positions) -> None:
         self.indices = positions['indices']
-        self.stms = positions['stm']
         self.centipawns = positions['centipawn']
     
     def __len__(self):
@@ -43,13 +42,11 @@ class sparse_set1_v2(Dataset):
         eval = self.centipawns[idx]
         eval = torch.as_tensor(eval, dtype=torch.float32)
 
-        stm = self.stms[idx]
-        stm = torch.as_tensor(stm, dtype=torch.float32)
-
         bitboard = torch.sparse_coo_tensor(indices, values, [768])
-        bitboard = bitboard.to_dense()
+        bitboard = bitboard.to_dense() 
+        # Torch currently does not support mps accelerated sparse tensor multiplication
         
-        return bitboard, eval, stm
+        return bitboard, eval
 
 
 class sparse_halfKP(Dataset):
@@ -82,7 +79,11 @@ class sparse_halfKP(Dataset):
 
         return white_feature_indices, black_feature_indices, num_active_features, stm, eval
 
+
 def collate_fn_halfkp(batch):
+    """
+    Custom batching function
+    """
     white_feature_indices, black_feature_indices, num_active_features, stm, eval = zip(*batch) 
     # Dataloader returns a list of tuples from sampling dataset -> zip used to accumulate each item
     white_feature_indices = torch.cat(white_feature_indices)
@@ -99,9 +100,11 @@ def collate_fn_halfkp(batch):
     black_feature_indices = torch.stack((position_indices, black_feature_indices), dim=0)
     # stack turns tensor into shape (2, sum(num_active_features)) so it can be input into sparse tensor
     # since sparse coordinate tensor takes indices in this form
-    # indices -> [[dimension1],
-    #             [dimension2]]
-    # resulting in a tensor of shape (dimension1, dimension2)
+    # indices -> [[dimension1_indices],
+    #             [dimension2_indices]]
+    # in our case, this would be 
+    # indices -> [[sample_numbers],
+    #             [feature_indices]]
     white_feature_tensor = torch.sparse_coo_tensor(
         indices=white_feature_indices,
         values=values,
@@ -153,13 +156,14 @@ class SmallNet(nn.Module):
 class halfKP_Net(nn.Module):
     def __init__(self, in_size, L_0_size, L_1_size, L_2_size) -> None:
         super().__init__()
+        self.ReLU = nn.ReLU()
         self.L_0_white = nn.Sequential(
             nn.Linear(in_size, L_0_size),
-            nn.ReLU()
+            self.ReLU
             )
         self.L_0_black = nn.Sequential(
             nn.Linear(in_size, L_0_size),
-            nn.ReLU()
+            self.ReLU
             )
         self.layerStack = nn.Sequential(
             nn.Linear(2*L_0_size, L_1_size),
@@ -177,9 +181,16 @@ class halfKP_Net(nn.Module):
         out = self.layerStack(acc)
 
         return out
+    
+    def forwardNNUE(self, acc_0, acc_1):
+        # Skipping first layer
+        acc = torch.cat([self.ReLU(acc_0), self.ReLU(acc_1)])
+        out = self.layerStack(acc)
+
+        return out
             
 
-class nnEval_model_set1_v1(pl.LightningModule):
+class nnEval_model_set1(pl.LightningModule):
     def __init__(self, net, learning_rate = 0.001) -> None:
         super().__init__()
         self.net = net
@@ -203,31 +214,6 @@ class nnEval_model_set1_v1(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
-
-class nnEval_model_set1_v2(pl.LightningModule):
-    def __init__(self, net, learning_rate = 0.001) -> None:
-        super().__init__()
-        self.net = net
-        self.lr = learning_rate
-        self.lossfn = torch.nn.MSELoss()
-
-    def training_step(self, batch):
-        x, y, stm = batch
-        stm = torch.reshape(stm, (-1, 1)) 
-        y = torch.reshape(y, (-1, 1)) 
-        y_hat = self.net(x) * (stm + (stm - 1)) # negates eval if black to move
-
-        wdl_eval_pred = torch.sigmoid(y_hat / SCALING_FACTOR) 
-        wdl_eval_target = torch.sigmoid(y / SCALING_FACTOR)
-
-        loss = self.lossfn(wdl_eval_pred, wdl_eval_target)
-        self.log("train_loss", loss) # log to tensorboard
-        return loss
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return optimizer
-
 
 class nnEval_model_halfKP(pl.LightningModule):
     def __init__(self, net, learning_rate = 0.001) -> None:
@@ -253,21 +239,22 @@ class nnEval_model_halfKP(pl.LightningModule):
     
 
 if __name__ == "__main__":
-    chess_path = './Datasets/halfKP_evals_sparse.npz'
+    FEATURE_SIZE_HALFKP = 40960
+    chess_path = './Datasets/bitboardevals.npz'
     f = open(chess_path, 'rb')
     chess_dataset_dict = np.load(f)
     # with open(chess_path, 'rb') as f:
     #     chess_dataset_dict = pkl.load(f)
 
-    chess_dataset = sparse_halfKP(chess_dataset_dict)
-    train_dataloader = DataLoader(chess_dataset, batch_size=4096, num_workers=0, collate_fn=collate_fn_halfkp)
+    chess_dataset = BIGDATA(chess_dataset_dict)
+    train_dataloader = DataLoader(chess_dataset, batch_size=512, num_workers=4, multiprocessing_context='fork') #collate_fn=collate_fn_halfkp
     # train_length = len(chess_dataset) // 1.25
     # test_length = len(chess_dataset) - train_length
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
 
-    model = nnEval_model_halfKP(halfKP_Net(FEATURE_SIZE_HALFKP, 256, 256, 256))
+    model = nnEval_model_set1(SmallNet(768))
     trainer = pl.Trainer.from_argparse_args(args)
     trainer.fit(model, train_dataloader)
     f.close()

@@ -25,7 +25,25 @@ COLOR_TABLE = {
     'b' : 0
 }
 
-def fen2bitboard(fen):
+
+def fen2bitboard_sparse_set1_v1(fen):
+    board, color, *_ = fen.split()
+    board = board.split("/")[::-1]
+    board = "".join(board)
+    sq = 0
+    out_indices = []
+    for pc in board:
+        if pc in ONETOEIGHT:
+            sq += int(pc)
+        else:
+            idx = PIECE_TABLE[pc][0] * 64 + sq
+            sq += 1
+            out_indices.append(idx)
+
+    return np.array(out_indices, dtype=np.int64)
+
+
+def fen2bitboard_set1_v2(fen):
     board, color, *_ = fen.split()
     board = board.split("/")[::-1]
     board = "".join(board)
@@ -40,23 +58,6 @@ def fen2bitboard(fen):
             # Changes sign of bit such that an opposing piece has value -1 and friendly piece has value 1 in bitboard
             sq += 1
     return out
-
-
-def fen2bitboard_sparse_set1_v2(fen):
-    board, color, *_ = fen.split()
-    board = board.split("/")[::-1]
-    board = "".join(board)
-    sq = 0
-    out_indices = []
-    for pc in board:
-        if pc in ONETOEIGHT:
-            sq += int(pc)
-        else:
-            idx = PIECE_TABLE[pc][0] * 64 + sq
-            sq += 1
-            out_indices.append(idx)
-
-    return np.array(out_indices, dtype=np.int64), COLOR_TABLE[color]
 
 
 def fen2halfKP_sparse(fen, max_active_features):
@@ -92,10 +93,11 @@ def fen2halfKP_sparse(fen, max_active_features):
     white_indices[:num_active_features] = white_indices[:num_active_features] + (w_king_sq * 10) * 64
     black_indices[:num_active_features] = black_indices[:num_active_features] + (b_king_sq * 10) * 64
     return white_indices, black_indices, num_active_features, COLOR_TABLE[color]
-    
+
+
 def transformCP(val):
     if val[0] == '#':
-        return int(val[1] + '5000')
+        return int(val[1] + '20000')
         
     elif val == '\ufeff+23': # For whatever reason, some zeros have value '\ufeff+23' 
         return 0
@@ -104,32 +106,9 @@ def transformCP(val):
         return int(val)
 
 
-def main_set1_v1(data_path, out_path):
+def main_sparse_set1_v1(fen_transform, data_path, out_path):
     """
     For first version of feature set 1
-    Stores whole bitboard input along with its eval
-    Results in a rather unnecesarily large file -> 40GB!!!
-    """
-    chess_data = pd.read_csv(data_path)
-    num_entries = len(chess_data)
-    big = {
-        'centipawn' : np.ndarray((num_entries), dtype=np.float32),
-        'bitboard' : np.ndarray((num_entries, 768), dtype=np.float32)
-    }
-    for i in trange(num_entries):
-        centipawn = transformCP(chess_data.iloc[i, 1])
-        bitboard = fen2bitboard(chess_data.iloc[i, 0])
-
-        big['centipawn'][i] = centipawn
-        big['bitboard'][i] = bitboard
-
-    with open(out_path, 'wb') as f:
-        pickle.dump(big, f)
-
-
-def main_sparse_set1_v2(fen_transform, data_path, out_path):
-    """
-    For second version of feature set 1
     Stores indices of non zero bits (only ones)
     Results in much smaller file size since feature set is very sparse (<5% non zero values)
     """
@@ -137,19 +116,40 @@ def main_sparse_set1_v2(fen_transform, data_path, out_path):
     num_entries = len(chess_data)
     d = {
         'indices' : np.ndarray(num_entries, dtype=np.object_),
-        'stm' : np.ndarray(num_entries), # np arrays are marginally faster to load
-        'centipawn' : np.ndarray(num_entries, dtype=np.float32)
+        'centipawn' : np.ndarray(num_entries, dtype=np.float32) # np arrays are marginally faster to load
     }
     for i in trange(num_entries):
         centipawn = transformCP(chess_data.iloc[i, 1])
-        indices, stm = fen_transform(chess_data.iloc[i, 0])
+        indices = fen_transform(chess_data.iloc[i, 0])
 
         d['indices'][i] = indices
-        d['stm'][i] = stm
         d['centipawn'][i] = centipawn
 
     with open(out_path, 'wb') as f:
-        pickle.dump(d, f)
+        pickle.dump(d, f) 
+
+
+def main_set1_v2(fen_transform, data_path, out_path):
+    """
+    For second version of feature set 1
+    Stores whole bitboard input along with its eval
+    Results in a rather unnecesarily large file -> 40GB!!!
+    """
+    chess_data = pd.read_csv(data_path)
+    num_entries = len(chess_data)
+    centipawns = np.ndarray((num_entries), dtype=np.float32)
+    bitboards = np.ndarray((num_entries, 768), dtype=np.float32)
+
+    for i in trange(num_entries):
+        centipawn = transformCP(chess_data.iloc[i, 1])
+        bitboard = fen_transform(chess_data.iloc[i, 0])
+
+        centipawns[i] = centipawn
+        bitboards[i] = bitboard
+
+    with open(out_path, 'wb') as f:
+        np.savez(f, centipawns=centipawns, bitboards=bitboards)
+
 
 def main_sparse_HALFKP(fen_transform, data_path, out_path):
     """
@@ -181,7 +181,6 @@ def main_sparse_HALFKP(fen_transform, data_path, out_path):
         np.savez(f, white_feature_indices=white_feature_indices, black_feature_indices=black_feature_indices,num_active_features=num_active_features ,stms=stms, centipawns=centipawns)
 
 
-
 if __name__ == '__main__':
     # bigdict = {
     #     'centipawn' : [],
@@ -197,8 +196,8 @@ if __name__ == '__main__':
     # transformed_data = pd.DataFrame(data=bigdict)
     # transformed_data.to_pickle('./Datasets/bitboardswitheval.pkl')
     data_path = r"./Datasets/chessData.csv"
-    out_path = r'./Datasets/halfKP_evals_sparse.npz'
-    main_sparse_HALFKP(fen_transform=fen2halfKP_sparse, data_path=data_path,out_path=out_path)
+    out_path = r'./Datasets/bitboardevals_sparse.pkl'
+    main_sparse_set1_v1(fen_transform=fen2bitboard_sparse_set1_v1, data_path=data_path,out_path=out_path)
 
 
     
