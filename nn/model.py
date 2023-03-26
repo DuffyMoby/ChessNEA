@@ -92,8 +92,7 @@ def collate_fn_halfkp(batch):
     stm = torch.stack(stm, dim=0)
     eval = torch.stack(eval, dim=0)
     # turn list of tensors into single tensor 
-    batch_size = eval.shape[0]
-    batch_range = torch.arange(batch_size)
+    batch_range = torch.arange(BATCH_SIZE)
     position_indices = torch.repeat_interleave(batch_range, num_active_features)
     values = torch.ones(torch.sum(num_active_features))
     white_feature_indices = torch.stack((position_indices, white_feature_indices), dim=0)
@@ -105,49 +104,22 @@ def collate_fn_halfkp(batch):
     # in our case, this would be 
     # indices -> [[sample_numbers],
     #             [feature_indices]]
-    white_feature_tensor = torch.sparse_coo_tensor(
-        indices=white_feature_indices,
-        values=values,
-        size=(batch_size, FEATURE_SIZE_HALFKP)
-    )
-    black_feature_tensor = torch.sparse_coo_tensor(
-        indices=black_feature_indices,
-        values=values,
-        size=(batch_size, FEATURE_SIZE_HALFKP)
-    )
 
-    return white_feature_tensor, black_feature_tensor, stm, eval
+    return white_feature_indices, black_feature_indices, values, stm, eval
 
                                                                                             
-class BigNet(nn.Module):
-    def __init__(self, in_size) -> None:
+class Net(nn.Module):
+    def __init__(self, in_size, L_0_size, L_1_size, L_2_size) -> None:
         super().__init__()
 
         self.layerStack = nn.Sequential(
-            nn.Linear(in_size, 2048),
+            nn.Linear(in_size, L_0_size),
             nn.ReLU(),
-            nn.Linear(2048, 2048),
+            nn.Linear(L_0_size, L_1_size),
             nn.ReLU(),
-            nn.Linear(2048, 2048),
+            nn.Linear(L_1_size, L_2_size),
             nn.ReLU(),
-            nn.Linear(2048, 1)
-        )
-    def forward(self, x):
-        return self.layerStack(x)
-
-
-class SmallNet(nn.Module):
-    def __init__(self, in_size) -> None:
-        super().__init__()
-
-        self.layerStack = nn.Sequential(
-            nn.Linear(in_size, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1)
+            nn.Linear(L_2_size, 1)
         )
     def forward(self, x):
         return self.layerStack(x)
@@ -223,7 +195,18 @@ class nnEval_model_halfKP(pl.LightningModule):
         self.lossfn = torch.nn.MSELoss()
 
     def training_step(self, batch):
-        white_feature_tensor, black_feature_tensor, stm, eval = batch
+        white_feature_indices, black_feature_indices, values, stm, eval = batch
+        white_feature_tensor = torch.sparse_coo_tensor(
+            indices=white_feature_indices,
+            values=values,
+            size=(BATCH_SIZE, FEATURE_SIZE_HALFKP)
+        )
+        black_feature_tensor = torch.sparse_coo_tensor(
+            indices=black_feature_indices,
+            values=values,
+            size=(BATCH_SIZE, FEATURE_SIZE_HALFKP)
+        )
+
         eval_pred = self.net(white_feature_tensor, black_feature_tensor, stm)
         
         wdl_eval_pred = torch.sigmoid(eval_pred / SCALING_FACTOR)
@@ -239,22 +222,23 @@ class nnEval_model_halfKP(pl.LightningModule):
     
 
 if __name__ == "__main__":
+    BATCH_SIZE = 4096
     FEATURE_SIZE_HALFKP = 40960
-    chess_path = './Datasets/bitboardevals.npz'
+    chess_path = './Datasets/halfKP_evals_sparse.npz'
     f = open(chess_path, 'rb')
     chess_dataset_dict = np.load(f)
     # with open(chess_path, 'rb') as f:
     #     chess_dataset_dict = pkl.load(f)
 
-    chess_dataset = BIGDATA(chess_dataset_dict)
-    train_dataloader = DataLoader(chess_dataset, batch_size=512, num_workers=4, multiprocessing_context='fork') #collate_fn=collate_fn_halfkp
+    chess_dataset = sparse_halfKP(chess_dataset_dict)
+    train_dataloader = DataLoader(chess_dataset, batch_size=BATCH_SIZE, num_workers=2, multiprocessing_context='fork', collate_fn=collate_fn_halfkp)
     # train_length = len(chess_dataset) // 1.25
     # test_length = len(chess_dataset) - train_length
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
 
-    model = nnEval_model_set1(SmallNet(768))
+    model = nnEval_model_halfKP(halfKP_Net(FEATURE_SIZE_HALFKP, 256, 64, 64))
     trainer = pl.Trainer.from_argparse_args(args)
     trainer.fit(model, train_dataloader)
     f.close()
