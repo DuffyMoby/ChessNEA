@@ -45,26 +45,28 @@ class Accumulator:
         
     def update(self, board: chess.Board, move: chess.Move):
         w_remove_feature_indicies, w_add_feature_indicies, b_remove_feature_indicies, b_add_feature_indicies = self.get_indices_from_move(board, move)
-        self.acc[1] += self.w_weights[:, w_add_feature_indicies].flatten() - torch.sum(self.w_weights[:, w_remove_feature_indicies], dim=1)
+        for i in range(len(w_remove_feature_indicies)):
+            self.acc[1] -= self.w_weights[:, w_remove_feature_indicies[i]]
+            self.acc[0] -= self.b_weights[:, b_remove_feature_indicies[i]]
+        self.acc[1] += self.w_weights[:, *w_add_feature_indicies] 
         # Since the only move that adds two bits is castling, which is handled by refresh()
-        # torch.sum can be skipped
-        self.acc[0] += self.b_weights[:, b_add_feature_indicies].flatten() - torch.sum(self.b_weights[:, b_remove_feature_indicies], dim=1)
+        self.acc[0] += self.b_weights[:, *b_add_feature_indicies] 
 
 
     def refresh(self, board: chess.Board):
         self.w_king_sq = board.king(1)
         self.b_king_sq = board.king(0)
         w_indices, b_indices = self.get_indices(board, self.w_king_sq, self.b_king_sq)
-        w_accumulator = self.w_biases + torch.sum(self.w_weights[:, w_indices], dim=1)
+        w_accumulator = self.w_biases + np.sum(self.w_weights[:, w_indices], axis=1)
         # since weights are stored as shape (out_features, in_features)
         # we sum the columns since each column represents an index of the input features
-        b_accumulator = self.b_biases + torch.sum(self.b_weights[:, b_indices], dim=1)
+        b_accumulator = self.b_biases + np.sum(self.b_weights[:, b_indices], axis=1)
         self.acc[1] = w_accumulator
         self.acc[0] = b_accumulator
         
         
     def new_instance(self):
-        new_acc = self.acc.clone()
+        new_acc = self.acc.copy()
         return Accumulator(self.w_weights, self.w_biases, self.b_weights, self.b_biases, new_acc, self.w_king_sq, self.b_king_sq)
     
     def get_indices(self, board: chess.Board, w_king_sq, b_king_sq):
