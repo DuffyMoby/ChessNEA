@@ -20,15 +20,16 @@ class SearcherNNUE:
         self.accumulator = Accumulator(self.w_weights, self.w_biases, self.b_weights, self.b_biases, np.zeros((2, self.w_weights.shape[0])))
 
 
-    def search(self, board, depth):
+    def search(self, board, depth, qs_depth):
         self.accumulator.refresh(board) 
         # search does not refresh the accumulator
         # therefore the accumulator must be refreshed before every search
-        evaluation, move = self.search_helper(self.net, self.accumulator, board, depth)
+        evaluation, move = self.search_helper(self.net, self.accumulator, board, depth, qs_depth)
         return evaluation, move
 
 
-    def search_helper(self, net: halfKP_Net, accumulator: Accumulator, board: chess.Board, depth: int, alpha = -math.inf, beta = math.inf):
+    def search_helper(self, net: halfKP_Net, accumulator: Accumulator, board: chess.Board, 
+                      depth: int, qs_depth: int,  alpha = -math.inf, beta = math.inf):
         if depth == 0:
             is_quiet, _ = self.is_quiet_gen_loud_moves(board)
 
@@ -43,13 +44,10 @@ class SearcherNNUE:
                 return evaluation, None # Best move is only relevant for the initial call
         
             else:
-                return self.quiesence_search(net, accumulator, board, 3, alpha, beta), None
+                return self.quiesence_search(net, accumulator, board, qs_depth, alpha, beta), None
             
         elif board.is_checkmate():
             return -math.inf, None
-        
-        elif board.is_stalemate():
-            return 0, None
         
         bestmove = None
         for move in board.legal_moves:
@@ -67,7 +65,7 @@ class SearcherNNUE:
                 new_accumulator.update(board, move)
                 board.push(move)
 
-            score, _ = self.search_helper(net, new_accumulator, board, depth - 1, -beta, -alpha)
+            score, _ = self.search_helper(net, new_accumulator, board, depth - 1, qs_depth, -beta, -alpha)
             score = -score 
             board.pop() #unmake move
             
@@ -99,10 +97,7 @@ class SearcherNNUE:
             return evaluation
         
         elif board.is_checkmate():
-            return -math.inf
-        
-        elif board.is_stalemate():
-            return 0
+            return -math.inf        
         
         for move in loud_moves:
             from_sq = move.from_square
@@ -117,7 +112,7 @@ class SearcherNNUE:
                 new_accumulator.update(board, move)
                 board.push(move)
 
-            score = -self.quiesence_search(net, new_accumulator, board, depth-1, -beta, -alpha)
+            score = -self.quiesence_search(net, new_accumulator, board, depth - 1, -beta, -alpha)
             board.pop()
 
             if score > alpha:
@@ -223,6 +218,6 @@ if __name__ == '__main__': #for performance profiling
     halfkp_model = nnEval_model_halfKP.load_from_checkpoint(halfkp_chkpt, net=halfKP_Net(40960, 256, 64, 64))
     net = halfkp_model.net
     searcher = SearcherNNUE(net)
-    evaluation, move = searcher.search(board, 5)
+    evaluation, move = searcher.search(board, 5, 3)
 
 
