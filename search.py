@@ -47,7 +47,7 @@ class SearcherNNUE:
                 return self.quiesence_search(net, accumulator, board, qs_depth, alpha, beta), None
             
         elif board.is_checkmate():
-            return -math.inf, None
+            return -500000, None
         
         bestmove = None
         for move in board.legal_moves:
@@ -97,7 +97,7 @@ class SearcherNNUE:
             return evaluation
         
         elif board.is_checkmate():
-            return -math.inf        
+            return -50000       
         
         for move in loud_moves:
             from_sq = move.from_square
@@ -143,32 +143,6 @@ class SearcherNNUE:
 def searchAB(eval_fn, board: chess.Board, depth, alpha = -math.inf, beta = +math.inf):
     """
     Negamax search with alpha-beta
-
-    A naive implementation of alpha beta for negamax could be:
-
-    If white node:
-        alpha = max(alpha, score)
-        if alpha > beta:
-            break
-
-    If black node:
-        beta = max(beta, score)
-        if beta > alpha:
-            break
-    This would be the case if alpha was the best previously searched score for white and beta is the best for black.
-
-    However, alpha and beta could represent the best previously searched score for the current colour and the best for the opposing colour respectivly
-    then for each recursive call and increase in depth - next alpha <- -beta, next beta <- -alpha.
-    as the best move for one colour is the worst move for the opposing colour.
-    Using this, alpha is then a lower bound on the value since it is minus the worse move for the opposing color,
-    and beta is the upper bound, since it is minus the best previously searched score of the opposing side, and therefore 
-    any position resulting in a greater evalution than beta is worse than a previously searched move for the opposing side
-    and therefore the opposing side will never play the move resulting in that position.
-    This means:
-        when alpha > beta:
-            prune position/stop searching position. 
-
-
     """
     if depth == 0 :
         return eval_fn(board), None
