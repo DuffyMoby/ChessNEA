@@ -7,23 +7,24 @@ import numpy as np
 
 class SearcherNNUE:
     def __init__(self, net: halfKP_Net):
-        # get weights from network to parse into accumulator
+        # Get weights from network to parse into accumulator.
+        # Converting weights from tensors to numpy since the operations done in the Accumulator
+        # are significantly faster on ndarrays since they do not have the gradient computation complexities
         self.w_weights = net.L_0_white[0].weight.detach().numpy()
-        # detach() must be called before numpy()
-        # converting tensors to numpy since the operations done in the Accumulator
-        # are significantly faster on ndarrays since they do not have a 
-        # gradient backend
         self.w_biases = net.L_0_white[0].bias.detach().numpy()
         self.b_weights = net.L_0_black[0].weight.detach().numpy()
         self.b_biases = net.L_0_black[0].bias.detach().numpy()
         self.net = net
-        self.accumulator = Accumulator(self.w_weights, self.w_biases, self.b_weights, self.b_biases, np.zeros((2, self.w_weights.shape[0])))
+        self.accumulator = Accumulator(self.w_weights, self.w_biases, 
+                                       self.b_weights, self.b_biases, 
+                                       np.zeros((2, self.w_weights.shape[0]))) # initialize accumulator as zeros
 
 
     def search(self, board, depth, qs_depth):
         self.accumulator.refresh(board) 
         # search does not refresh the accumulator
         # therefore the accumulator must be refreshed before every search
+        # so it reflects the current board state
         evaluation, move = self.search_helper(self.net, self.accumulator, board, depth, qs_depth)
         return evaluation, move
 
@@ -31,12 +32,15 @@ class SearcherNNUE:
     def search_helper(self, net: halfKP_Net, accumulator: Accumulator, board: chess.Board, 
                       depth: int, qs_depth: int,  alpha = -math.inf, beta = math.inf):
         if depth == 0:
+            # check quietness
             is_quiet, _ = self.is_quiet_gen_loud_moves(board)
 
             if is_quiet:
+                # Staticly evaluate position
                 stm = int(board.turn)
-                acc1 = torch.from_numpy(accumulator.acc[stm]).float()
                 # Accumulators are ndaraays, so they must be converted to tensors
+                # before being input into the network
+                acc1 = torch.from_numpy(accumulator.acc[stm]).float()
                 acc2 = torch.from_numpy(accumulator.acc[1 - stm]).float()
                 with torch.no_grad(): # Improves performance slightly 
                     evaluation = (stm + (stm - 1)) * net.forwardNNUE(acc1, acc2)
@@ -47,16 +51,17 @@ class SearcherNNUE:
                 return self.quiesence_search(net, accumulator, board, qs_depth, alpha, beta), None
             
         elif board.is_checkmate():
-            return -500000, None
+            return -50000, None
         
         bestmove = None
         for move in board.legal_moves:
             from_sq = move.from_square
             is_king_move = board.piece_at(from_sq).symbol().lower() == 'k'
+            # A new accumulator instance is needed so multiple moves can be played from one position
             new_accumulator = accumulator.new_instance() 
-            # Since depth will not be very large - depth<20 
-            # a new instance of the accumulator can be created for every recursive call without taking up excessive memory
-            # the new instance is needed so multiple moves can be played from one position
+            # Since depth will not be very large -> depth < 20, 
+            # a new instance of the accumulator can be created for every recursive call 
+
             if is_king_move:
                 board.push(move) 
                 new_accumulator.refresh(board) 
@@ -74,11 +79,7 @@ class SearcherNNUE:
                 bestmove = move
             
             if alpha >= beta: 
-                # if best score is greater than opponents best previously searched eval
-                # then break/stop searching node 
                 return beta, None 
-                # return None since initial call has beta = math.inf 
-                # so initial call will never satisfy this condition
     
         return alpha, bestmove
     
@@ -99,7 +100,7 @@ class SearcherNNUE:
         elif board.is_checkmate():
             return -50000       
         
-        for move in loud_moves:
+        for move in loud_moves: # Search only the loud moves 
             from_sq = move.from_square
             is_king_move = board.piece_at(from_sq).symbol().lower() == 'k'
             new_accumulator = accumulator.new_instance() 
@@ -115,8 +116,7 @@ class SearcherNNUE:
             score = -self.quiesence_search(net, new_accumulator, board, depth - 1, -beta, -alpha)
             board.pop()
 
-            if score > alpha:
-                alpha = score
+            alpha = max(alpha, score)
 
             if alpha >= beta:
                 return beta
@@ -130,8 +130,9 @@ class SearcherNNUE:
         if is_check:
             return False, board.legal_moves
         
+        # checks if generate_legal_captures() is empty
         try:
-            next(board.generate_legal_captures()) # checks if iterable is empty
+            next(board.generate_legal_captures()) 
         except StopIteration:
             return True, []
         
@@ -147,23 +148,25 @@ def searchAB(eval_fn, board: chess.Board, depth, alpha = -math.inf, beta = +math
     if depth == 0 :
         return eval_fn(board), None
         
-    max_score = -math.inf
     bestmove = None
-    # TODO move ordering, iterative deeping, tranposition table 
     for move in board.legal_moves:
         board.push(move)
         score, _ = searchAB(eval_fn, board, depth - 1, -beta, -alpha)
         score = -score
         board.pop()
-        if score > max_score:
-            max_score = score
+
+        if score > alpha:
+            alpha = score
             bestmove = move
         
-        alpha = max(alpha, max_score)
         if alpha >= beta:
-            break
- 
-    return max_score, bestmove
+            # If best score is greater than opponents best previously searched eval
+            # then stop searching node and return said previously searched eval. 
+            # This guarantees this node wont be the best node of its parent node
+            # since we are using strictly greater than. 
+            return beta, None
+        
+    return alpha, bestmove
 
 def search(eval_fn, board: chess.Board, depth):
     """
