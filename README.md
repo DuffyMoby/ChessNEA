@@ -1,2 +1,2 @@
 # ChessNEA
-Bruh
+Small chess engine using NegaMax, QS search and NNNUE eval. 
